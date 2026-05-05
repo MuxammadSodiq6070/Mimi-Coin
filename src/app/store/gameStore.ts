@@ -25,6 +25,9 @@ interface GameState {
 
   // Inventory
   inventory: any[];
+  tapCycleProgress: number;
+  tapCycleTarget: number;
+  lastTapReward: any | null;
 
   // Meta
   lastTapTime: number;
@@ -61,6 +64,9 @@ export const useGameStore = create<GameState>()(
       level: 1,
       multiplier: 1,
       inventory: [],
+      tapCycleProgress: 0,
+      tapCycleTarget: 250,
+      lastTapReward: null,
       lastTapTime: 0,
       hasLoadedInitial: false,
       isSyncing: false,
@@ -100,7 +106,7 @@ export const useGameStore = create<GameState>()(
       // Core mechanics: Tap
       tap: () => {
         const now = Date.now();
-        const { energy, balance, multiplier, lastTapTime, pendingTaps, isSyncing } = get();
+        const { energy, tapCycleProgress, tapCycleTarget, lastTapTime, pendingTaps } = get();
         
         // If syncing or error, might still allow tap but let's just let them tap
         // unless sync error is critical. We will allow optimistic taps.
@@ -115,19 +121,15 @@ export const useGameStore = create<GameState>()(
           return { amount: 0, success: false }; // Out of energy
         }
 
-        // 3. Dynamic reward calculation
-        const baseReward = 10;
-        const reward = baseReward * multiplier;
-        
-        // Update state optimistically
+        // Taps now build server-validated cycle progress; rewards only settle after 200-300 taps.
         set({
-          balance: balance + reward,
           energy: energy - 1,
+          tapCycleProgress: Math.min(tapCycleTarget, tapCycleProgress + 1),
           lastTapTime: now,
           pendingTaps: pendingTaps + 1
         });
         
-        return { amount: reward, success: true };
+        return { amount: 1, success: true };
       },
       
       syncTapsWithBackend: async () => {
@@ -147,8 +149,9 @@ export const useGameStore = create<GameState>()(
           // Update local state with authoritative server state
           // (Adding back any new pending taps that happened during the request)
           set((state) => ({
-            balance: userData.balance + (state.pendingTaps * 10 * userData.multiplier),
-            energy: userData.energy - state.pendingTaps,
+            ...userData,
+            tapCycleProgress: Math.min((userData.tapCycleProgress || 0) + state.pendingTaps, userData.tapCycleTarget || 250),
+            energy: Math.max(0, userData.energy - state.pendingTaps),
             level: userData.level,
             multiplier: userData.multiplier,
             maxEnergy: userData.maxEnergy,

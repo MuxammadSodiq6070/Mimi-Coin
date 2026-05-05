@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from "react-router";
-import { Trophy, Gamepad2, ShoppingBag, User, CloudOff, Loader2, Coins, Send, WifiOff } from "lucide-react";
+import { Trophy, Gamepad2, ShoppingBag, User, CloudOff, Loader2, Coins, Send, WifiOff, BookOpen } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
 import { useGameStore } from "../../store/gameStore";
@@ -166,6 +166,7 @@ export function MobileLayout() {
             <NavItem to="/ratings" icon={<Trophy size={22} />} label="Ratings" />
             <NavItem to="/" icon={<Gamepad2 size={22} />} label="Games" />
             <NavItem to="/tap" icon={<Coins size={22} />} label="Tap" />
+            <NavItem to="/learn" icon={<BookOpen size={22} />} label="Learn" />
             <NavItem to="/market" icon={<ShoppingBag size={22} />} label="Market" />
             <NavItem to="/profile" icon={<User size={22} />} label="Profile" />
           </nav>

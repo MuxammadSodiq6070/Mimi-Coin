@@ -12,5 +12,7 @@
   ## Telegram Mini App setup
 
   Set `TELEGRAM_BOT_TOKEN` in the Supabase Edge Function environment before deploying. The backend rejects protected requests unless `X-Telegram-Init-Data` verifies against that bot token.
+
+  Set `LEARNING_ADMIN_TOKEN` to allow developer-only creation of Learn & Earn modules through the Supabase Edge Function.
   
 # Mimi-Coin

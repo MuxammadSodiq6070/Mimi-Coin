@@ -26,7 +26,15 @@ export interface UserData {
   multiplier: number;
   avatar: string | null;
   inventory: InventoryItem[];
+  tapCycleProgress?: number;
+  tapCycleTarget?: number;
+  lastTapReward?: Reward | null;
   createdAt?: number;
+}
+
+export interface Reward {
+  type: "coins" | "diamonds" | "tickets";
+  amount: number;
 }
 
 export interface InventoryItem {
@@ -102,6 +110,20 @@ export interface UserSettings {
   language: string;
   profilePublic: boolean;
   leaderboardVisible: boolean;
+}
+
+export interface LearningModule {
+  id: string;
+  title: string;
+  imageUrl: string;
+  difficulty: "beginner" | "medium" | "advanced";
+  instruction: string;
+  reward: {
+    coins: number;
+    diamonds: number;
+    tickets: number;
+  };
+  completed: boolean;
 }
 
 export const api = {
@@ -192,6 +214,37 @@ export const api = {
       body: JSON.stringify(settings)
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to update settings"));
+    return res.json();
+  },
+
+  async getLearningModules(): Promise<LearningModule[]> {
+    const res = await fetch(`${API_BASE}/learning/modules`, {
+      headers: getHeaders(),
+    });
+    if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch learning modules"));
+    return res.json();
+  },
+
+  async createLearningModule(adminToken: string, module: { title?: string; imageUrl: string; prompt: string; difficulty?: "beginner" | "medium" | "advanced" }): Promise<any> {
+    const res = await fetch(`${API_BASE}/learning/modules`, {
+      method: 'POST',
+      headers: {
+        ...getHeaders(),
+        "X-Admin-Token": adminToken
+      },
+      body: JSON.stringify(module)
+    });
+    if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to create learning module"));
+    return res.json();
+  },
+
+  async completeLearningModule(moduleId: string, response: string): Promise<any> {
+    const res = await fetch(`${API_BASE}/learning/complete`, {
+      method: 'POST',
+      headers: getMutationHeaders(),
+      body: JSON.stringify({ moduleId, response })
+    });
+    if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to complete learning module"));
     return res.json();
   },
 

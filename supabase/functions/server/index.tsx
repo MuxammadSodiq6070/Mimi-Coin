@@ -22,6 +22,13 @@ app.get("/make-server-fd08abf5/health", (c) => {
 
 app.use("/make-server-fd08abf5/*", async (c, next) => {
   try {
+    const isLearningAdminCreate = c.req.path === "/make-server-fd08abf5/learning/modules" && c.req.method === "POST";
+    if (isLearningAdminCreate && LEARNING_ADMIN_TOKEN && c.req.header("X-Admin-Token") === LEARNING_ADMIN_TOKEN) {
+      c.set("isAdmin", true);
+      await next();
+      return;
+    }
+
     const telegramUser = await verifyTelegramRequest(c.req.header("X-Telegram-Init-Data") || "");
     c.set("telegramUser", telegramUser);
     await next();
@@ -37,8 +44,10 @@ const AUCTION_FEE_RATE = Number(Deno.env.get("AUCTION_FEE_RATE") || 0.05);
 const TRADE_FEE_RATE = Number(Deno.env.get("TRADE_FEE_RATE") || 0.02);
 const MAX_TAPS_PER_REQUEST = 30;
 const MAX_TAPS_PER_MINUTE = 360;
-const TAP_REWARD_BASE = 10;
 const ENERGY_REGEN_PER_SECOND = 3;
+const MIN_TAP_CYCLE = 200;
+const MAX_TAP_CYCLE = 300;
+const LEARNING_ADMIN_TOKEN = Deno.env.get("LEARNING_ADMIN_TOKEN") || Deno.env.get("ADMIN_TOKEN") || "";
 
 const mutationResult = async (c: any, scope: string, handler: () => Promise<any>) => {
   const userId = getVerifiedUserId(c);
@@ -133,6 +142,72 @@ const addNotification = async (userId: string, notification: any) => {
     ...notification
   });
   await kv.set(key, notifications.slice(0, 50));
+};
+
+const getTapCycleTarget = () => MIN_TAP_CYCLE + Math.floor(Math.random() * (MAX_TAP_CYCLE - MIN_TAP_CYCLE + 1));
+
+const ensureTapCycle = (user: any) => {
+  if (!user.tapCycleTarget) user.tapCycleTarget = getTapCycleTarget();
+  if (user.tapCycleProgress === undefined) user.tapCycleProgress = 0;
+};
+
+const createTapCycleReward = (user: any) => {
+  const roll = Math.random();
+  const cycle = user.tapRewardCycles || 0;
+  const scaling = Math.min(2.5, 1 + Math.floor(cycle / 25) * 0.1);
+
+  if (roll < 0.72) {
+    return { type: "coins", amount: Math.floor((35 + Math.random() * 45) * scaling) };
+  }
+  if (roll < 0.9) {
+    return { type: "tickets", amount: 1 };
+  }
+  return { type: "diamonds", amount: Math.random() < 0.8 ? 1 : 2 };
+};
+
+const applyReward = (user: any, reward: any) => {
+  if (reward.type === "coins") {
+    user.balance += reward.amount;
+    user.lifetimeEarnings = (user.lifetimeEarnings || 0) + reward.amount;
+  } else if (reward.type === "diamonds") {
+    user.diamonds += reward.amount;
+  } else if (reward.type === "tickets") {
+    user.tickets = (user.tickets || 0) + reward.amount;
+  }
+};
+
+const learningDifficultyConfig: Record<string, any> = {
+  beginner: { reward: { coins: [120, 180], diamonds: [0, 1], tickets: [0, 1] }, minWords: 8 },
+  medium: { reward: { coins: [240, 360], diamonds: [1, 2], tickets: [1, 2] }, minWords: 16 },
+  advanced: { reward: { coins: [450, 700], diamonds: [2, 4], tickets: [2, 3] }, minWords: 28 }
+};
+
+const getLearningInstruction = (module: any, userId: string) => {
+  const variants = [
+    `Study the example, then explain how you would apply this: ${module.prompt}`,
+    `Analyze the visual and complete the task with this goal: ${module.prompt}`,
+    `Turn the example into a practical answer. Focus on: ${module.prompt}`
+  ];
+  const index = Math.abs(hashString(`${module.id}:${userId}`)) % variants.length;
+  return variants[index];
+};
+
+const getLearningReward = (difficulty: string, moduleId: string, userId: string) => {
+  const config = learningDifficultyConfig[difficulty] || learningDifficultyConfig.beginner;
+  const seed = Math.abs(hashString(`${moduleId}:${userId}:reward`));
+  const coins = config.reward.coins[0] + (seed % (config.reward.coins[1] - config.reward.coins[0] + 1));
+  const diamonds = config.reward.diamonds[0] + (seed % (config.reward.diamonds[1] - config.reward.diamonds[0] + 1));
+  const tickets = config.reward.tickets[0] + (seed % (config.reward.tickets[1] - config.reward.tickets[0] + 1));
+  return { coins, diamonds, tickets };
+};
+
+const hashString = (input: string) => {
+  let hash = 0;
+  for (let i = 0; i < input.length; i++) {
+    hash = ((hash << 5) - hash) + input.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
 };
 
 const getTelegramDisplayName = (user: any) => {
@@ -236,6 +311,9 @@ app.post("/make-server-fd08abf5/user", async (c) => {
         level: 1,
         multiplier: 1,
         lastTapTime: 0,
+        tapCycleProgress: 0,
+        tapCycleTarget: getTapCycleTarget(),
+        tapRewardCycles: 0,
         inventory: [], // { id, name, type, rarity, acquiredAt }
         createdAt: Date.now()
       };
@@ -247,6 +325,7 @@ app.post("/make-server-fd08abf5/user", async (c) => {
       user.dailyTapCount = 0;
       user.dailyRewardClaimed = false;
     }
+    ensureTapCycle(user);
     syncTelegramProfile(user, telegramUser);
     updateProgression(user);
     await kv.set(userKey, user);
@@ -293,13 +372,22 @@ app.post("/make-server-fd08abf5/tap", async (c) => {
       const tapCount = Math.min(requestedCount, user.energy);
       if (tapCount > 0) {
         const dailyTapCount = user.dailyTapCount || 0;
-        const diminishingFactor = dailyTapCount > 5000 ? 0.25 : dailyTapCount > 2000 ? 0.5 : dailyTapCount > 1000 ? 0.75 : 1;
-        const reward = Math.floor(tapCount * TAP_REWARD_BASE * user.multiplier * diminishingFactor);
-        user.balance += reward;
-        user.lifetimeEarnings = (user.lifetimeEarnings || 0) + reward;
+        ensureTapCycle(user);
         user.energy -= tapCount;
         user.tapCount = (user.tapCount || 0) + tapCount;
         user.dailyTapCount = dailyTapCount + tapCount;
+        user.tapCycleProgress += tapCount;
+        user.lastTapReward = null;
+
+        if (user.tapCycleProgress >= user.tapCycleTarget) {
+          user.tapCycleProgress -= user.tapCycleTarget;
+          user.tapRewardCycles = (user.tapRewardCycles || 0) + 1;
+          const reward = createTapCycleReward(user);
+          applyReward(user, reward);
+          user.lastTapReward = reward;
+          user.tapCycleTarget = getTapCycleTarget();
+        }
+
         user.lastTapTime = now;
         updateProgression(user);
         await kv.set(userKey, user);
@@ -344,14 +432,9 @@ app.post("/make-server-fd08abf5/energy/regen", async (c) => {
     if (!user) return c.json({ error: "User not found" }, 404);
 
     const now = Date.now();
-    const timePassed = now - (user.lastEnergyRegen || user.lastTapTime || now);
-    const energyToRecover = Math.floor(timePassed / 1000) * 3;
-    
-    if (energyToRecover > 0) {
-      user.energy = Math.min(user.maxEnergy, user.energy + energyToRecover);
-      user.lastEnergyRegen = now;
-      await kv.set(userKey, user);
-    }
+    applyEnergyRegen(user, now);
+    ensureTapCycle(user);
+    await kv.set(userKey, user);
     
     return c.json(user);
   } catch (err: any) {
@@ -457,6 +540,108 @@ app.post("/make-server-fd08abf5/settings", async (c) => {
   } catch (err: any) {
     console.error(err);
     return c.json({ error: err.message }, 500);
+  }
+});
+
+app.post("/make-server-fd08abf5/learning/modules", async (c) => {
+  try {
+    if (!c.get("isAdmin")) return c.json({ error: "Admin token required" }, 401);
+
+    const { title, imageUrl, prompt, difficulty } = await c.req.json();
+    const safePrompt = String(prompt || "").trim();
+    const safeImageUrl = String(imageUrl || "").trim();
+    const safeDifficulty = ["beginner", "medium", "advanced"].includes(difficulty) ? difficulty : "beginner";
+    if (!safePrompt || !safeImageUrl) return c.json({ error: "imageUrl and prompt are required" }, 400);
+
+    const id = `learning_${Date.now()}_${crypto.randomUUID()}`;
+    const module = {
+      id,
+      title: String(title || "Learning Module").trim().slice(0, 80),
+      imageUrl: safeImageUrl,
+      prompt: safePrompt.slice(0, 1000),
+      difficulty: safeDifficulty,
+      status: "active",
+      createdAt: Date.now()
+    };
+
+    await kv.set(`learning:module:${id}`, module);
+    return c.json(module);
+  } catch (err: any) {
+    console.error(err);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.get("/make-server-fd08abf5/learning/modules", async (c) => {
+  try {
+    const userId = getVerifiedUserId(c);
+    const modules = (await kv.getByPrefix("learning:module:"))
+      .filter((module: any) => module.status === "active")
+      .sort((a: any, b: any) => b.createdAt - a.createdAt);
+
+    const completed = await kv.get(`learning:completed:${userId}`) || {};
+    return c.json(modules.map((module: any) => ({
+      id: module.id,
+      title: module.title,
+      imageUrl: module.imageUrl,
+      difficulty: module.difficulty,
+      instruction: getLearningInstruction(module, userId),
+      reward: getLearningReward(module.difficulty, module.id, userId),
+      completed: Boolean(completed[module.id])
+    })));
+  } catch (err: any) {
+    console.error(err);
+    return c.json({ error: err.message }, 500);
+  }
+});
+
+app.post("/make-server-fd08abf5/learning/complete", async (c) => {
+  try {
+    const userId = getVerifiedUserId(c);
+    const { moduleId, response } = await c.req.json();
+    if (!moduleId) return c.json({ error: "Module is required" }, 400);
+
+    return mutationResult(c, "learning-complete", async () => withLocks([`user:${userId}`, `learning:${userId}:${moduleId}`], async () => {
+      const module = await kv.get(`learning:module:${moduleId}`);
+      if (!module || module.status !== "active") throw new Error("Learning module not found");
+
+      const completedKey = `learning:completed:${userId}`;
+      const completed = await kv.get(completedKey) || {};
+      if (completed[moduleId]) throw new Error("Learning module already completed");
+
+      const answer = String(response || "").trim();
+      const words = answer.split(/\s+/).filter(Boolean);
+      const config = learningDifficultyConfig[module.difficulty] || learningDifficultyConfig.beginner;
+      const promptKeywords = String(module.prompt).toLowerCase().split(/\W+/).filter((word) => word.length > 4).slice(0, 8);
+      const matchedKeywords = promptKeywords.filter((word) => answer.toLowerCase().includes(word)).length;
+
+      if (words.length < config.minWords || matchedKeywords < Math.min(2, promptKeywords.length)) {
+        throw new Error("Answer needs more detail from the instruction before rewards can be claimed.");
+      }
+
+      const user = await kv.get(`user:${userId}`);
+      if (!user) throw new Error("User not found");
+
+      const reward = getLearningReward(module.difficulty, module.id, userId);
+      applyReward(user, { type: "coins", amount: reward.coins });
+      if (reward.diamonds > 0) applyReward(user, { type: "diamonds", amount: reward.diamonds });
+      if (reward.tickets > 0) applyReward(user, { type: "tickets", amount: reward.tickets });
+      updateProgression(user);
+
+      completed[moduleId] = {
+        completedAt: Date.now(),
+        response: answer.slice(0, 2000),
+        reward
+      };
+
+      await kv.set(`user:${userId}`, user);
+      await kv.set(completedKey, completed);
+
+      return { user, reward, moduleId };
+    }));
+  } catch (err: any) {
+    console.error(err);
+    return c.json({ error: err.message }, 400);
   }
 });
 
