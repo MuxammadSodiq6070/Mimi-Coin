@@ -1,13 +1,23 @@
-import { projectId, publicAnonKey } from "/utils/supabase/info";
+import { getSupabaseConfigError, publicAnonKey, supabaseUrl } from "/utils/supabase/info";
 import { getTelegramInitData } from "./telegram";
 
-const API_BASE = `https://${projectId}.supabase.co/functions/v1/make-server-fd08abf5`;
+const API_BASE = `${supabaseUrl}/functions/v1/make-server-fd08abf5`;
+
+const assertSupabaseConfig = () => {
+  const error = getSupabaseConfigError();
+  if (error) throw new Error(error);
+};
 
 const getHeaders = () => ({
   "Content-Type": "application/json",
   "Authorization": `Bearer ${publicAnonKey}`,
   "X-Telegram-Init-Data": getTelegramInitData()
 });
+
+const fetchApi = async (path: string, init?: RequestInit) => {
+  assertSupabaseConfig();
+  return fetch(`${API_BASE}${path}`, init);
+};
 
 const getMutationHeaders = () => ({
   ...getHeaders(),
@@ -129,7 +139,7 @@ export interface LearningModule {
 export const api = {
   // Fetch initial user data
   async getUser(id: string, username?: string, avatar?: string | null): Promise<UserData> {
-    const res = await fetch(`${API_BASE}/user`, {
+    const res = await fetchApi(`/user`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ id, username, avatar })
@@ -140,7 +150,7 @@ export const api = {
 
   // Sync state to backend (taps)
   async syncTaps(id: string, count: number): Promise<UserData> {
-    const res = await fetch(`${API_BASE}/tap`, {
+    const res = await fetchApi(`/tap`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ id, count, timestamp: Date.now() })
@@ -151,7 +161,7 @@ export const api = {
 
   // Trigger energy regeneration on backend
   async regenEnergy(id: string): Promise<UserData> {
-    const res = await fetch(`${API_BASE}/energy/regen`, {
+    const res = await fetchApi(`/energy/regen`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ id })
@@ -162,7 +172,7 @@ export const api = {
 
   // Spend coins on backend
   async spend(id: string, amount: number): Promise<UserData> {
-    const res = await fetch(`${API_BASE}/spend`, {
+    const res = await fetchApi(`/spend`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ id, amount })
@@ -173,7 +183,7 @@ export const api = {
 
   // Fetch global leaderboard
   async getLeaderboard(): Promise<LeaderboardUser[]> {
-    const res = await fetch(`${API_BASE}/leaderboard`, {
+    const res = await fetchApi(`/leaderboard`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch leaderboard"));
@@ -182,7 +192,7 @@ export const api = {
 
   // Update profile
   async updateProfile(id: string, username?: string, avatar?: string): Promise<UserData> {
-    const res = await fetch(`${API_BASE}/profile/update`, {
+    const res = await fetchApi(`/profile/update`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ id, username, avatar })
@@ -192,7 +202,7 @@ export const api = {
   },
 
   async getNotifications(): Promise<AppNotification[]> {
-    const res = await fetch(`${API_BASE}/notifications`, {
+    const res = await fetchApi(`/notifications`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch notifications"));
@@ -200,7 +210,7 @@ export const api = {
   },
 
   async getSettings(): Promise<UserSettings> {
-    const res = await fetch(`${API_BASE}/settings`, {
+    const res = await fetchApi(`/settings`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch settings"));
@@ -208,7 +218,7 @@ export const api = {
   },
 
   async updateSettings(settings: Partial<UserSettings>): Promise<UserSettings> {
-    const res = await fetch(`${API_BASE}/settings`, {
+    const res = await fetchApi(`/settings`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify(settings)
@@ -218,7 +228,7 @@ export const api = {
   },
 
   async getLearningModules(): Promise<LearningModule[]> {
-    const res = await fetch(`${API_BASE}/learning/modules`, {
+    const res = await fetchApi(`/learning/modules`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch learning modules"));
@@ -226,7 +236,7 @@ export const api = {
   },
 
   async createLearningModule(adminToken: string, module: { title?: string; imageUrl: string; prompt: string; difficulty?: "beginner" | "medium" | "advanced" }): Promise<any> {
-    const res = await fetch(`${API_BASE}/learning/modules`, {
+    const res = await fetchApi(`/learning/modules`, {
       method: 'POST',
       headers: {
         ...getHeaders(),
@@ -239,7 +249,7 @@ export const api = {
   },
 
   async completeLearningModule(moduleId: string, response: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/learning/complete`, {
+    const res = await fetchApi(`/learning/complete`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ moduleId, response })
@@ -250,7 +260,7 @@ export const api = {
 
   // Auctions
   async getAuctions(): Promise<Auction[]> {
-    const res = await fetch(`${API_BASE}/auctions`, {
+    const res = await fetchApi(`/auctions`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch auctions"));
@@ -258,7 +268,7 @@ export const api = {
   },
 
   async createAuction(userId: string, itemName: string, itemType: string, price: number, duration?: number): Promise<Auction> {
-    const res = await fetch(`${API_BASE}/auctions/create`, {
+    const res = await fetchApi(`/auctions/create`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, itemName, itemType, price, duration })
@@ -268,7 +278,7 @@ export const api = {
   },
 
   async buyAuction(userId: string, auctionId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/auctions/buy`, {
+    const res = await fetchApi(`/auctions/buy`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, auctionId })
@@ -282,7 +292,7 @@ export const api = {
 
   // Missions
   async getMissions(userId: string): Promise<Missions> {
-    const res = await fetch(`${API_BASE}/missions/${userId}`, {
+    const res = await fetchApi(`/missions/${userId}`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch missions"));
@@ -290,7 +300,7 @@ export const api = {
   },
 
   async claimMission(userId: string, missionId: string, missionType: "daily" | "weekly"): Promise<any> {
-    const res = await fetch(`${API_BASE}/missions/claim`, {
+    const res = await fetchApi(`/missions/claim`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, missionId, missionType })
@@ -303,7 +313,7 @@ export const api = {
   },
 
   async updateMissionProgress(userId: string, missionId: string, missionType: "daily" | "weekly", progress: number): Promise<Missions> {
-    const res = await fetch(`${API_BASE}/missions/progress`, {
+    const res = await fetchApi(`/missions/progress`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, missionId, missionType, progress })
@@ -314,7 +324,7 @@ export const api = {
 
   // Games
   async playSpin(userId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/games/spin`, {
+    const res = await fetchApi(`/games/spin`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId })
@@ -327,7 +337,7 @@ export const api = {
   },
 
   async playLottery(userId: string, numbers: number[]): Promise<any> {
-    const res = await fetch(`${API_BASE}/games/lottery`, {
+    const res = await fetchApi(`/games/lottery`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, numbers })
@@ -341,7 +351,7 @@ export const api = {
 
   // P2P Trading
   async getTrades(): Promise<Trade[]> {
-    const res = await fetch(`${API_BASE}/trades`, {
+    const res = await fetchApi(`/trades`, {
       headers: getHeaders(),
     });
     if (!res.ok) throw new Error(await getErrorMessage(res, "Failed to fetch trades"));
@@ -355,7 +365,7 @@ export const api = {
     requestType: "coins" | "diamonds" | "tickets",
     requestAmount: number
   ): Promise<Trade> {
-    const res = await fetch(`${API_BASE}/trades/create`, {
+    const res = await fetchApi(`/trades/create`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, offerType, offerAmount, requestType, requestAmount })
@@ -368,7 +378,7 @@ export const api = {
   },
 
   async acceptTrade(userId: string, tradeId: string): Promise<any> {
-    const res = await fetch(`${API_BASE}/trades/accept`, {
+    const res = await fetchApi(`/trades/accept`, {
       method: 'POST',
       headers: getMutationHeaders(),
       body: JSON.stringify({ userId, tradeId })
