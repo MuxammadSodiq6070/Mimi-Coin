@@ -16,6 +16,16 @@ app.use(
   }),
 );
 
+app.options("*", (c) => {
+  return c.text("ok", 200, {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, X-Telegram-Init-Data, Idempotency-Key",
+    "Access-Control-Allow-Methods":
+      "GET, POST, PUT, DELETE, OPTIONS",
+  });
+});
+
 app.get("/make-server-fd08abf5/health", (c) => {
   return c.json({ status: "ok" });
 });
